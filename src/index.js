@@ -1,38 +1,50 @@
-// Файл: src/index.js
-// To-Do List бот с интерфейсом на Inline-кнопках
-
 import { Client } from '@neondatabase/serverless';
 
 export default {
     async fetch(request, env, ctx) {
+        const url = new URL(request.url);
+
+        // БЫСТРОЕ РЕШЕНИЕ: Принимаем статус от Python-скрипта напрямую в KV
+        if (request.method === 'POST' && url.pathname === '/update_qb') {
+            const data = await request.json();
+            await env.BOT_STATES_UNIVERSAL.put('qb_status', data.status);
+            const cmd = await env.BOT_STATES_UNIVERSAL.get('qb_cmd');
+            return new Response(JSON.stringify({ cmd: cmd || 'idle' }), {
+                headers: { 'Content-Type': 'application/json' }
+            });
+        }
+
         if (request.method === 'POST') {
             try {
                 const update = await request.json();
+                if (update.message && update.message.text) {
+                    const chatId = update.message.chat.id;
+                    const text = update.message.text;
 
-                // Обработка нажатий на Inline-кнопки
-                if (update.callback_query) {
-                    await handleCallbackQuery(update.callback_query, env);
-                }
-                // Обработка текстовых сообщений
-                else if (update.message && update.message.text) {
-                    const message = update.message;
-                    const text = message.text;
-
-                    // Единственная команда, которую мы оставим - /start
-                    if (text === '/start') {
-                        await handleStart(message, env);
+                    if (text === '/status') {
+                        // Читаем статус из KV (это не упадет, даже если Neon лежит)
+                        const status = await env.BOT_STATES_UNIVERSAL.get('qb_status') || "Нет данных от ПК";
+                        await sendMessage(env.BOT_TOKEN, chatId, `📊 *Торренты:* \n${status}`, { parse_mode: 'Markdown' });
+                    } 
+                    else if (text === '/shutdown_pc') {
+                        await env.BOT_STATES_UNIVERSAL.put('qb_cmd', 'shutdown');
+                        await sendMessage(env.BOT_TOKEN, chatId, "🛑 Команда на выключение записана в KV.");
+                    }
+                    else if (text === '/start') {
+                        await handleStart(update.message, env);
                     } else {
-                        // Любой другой текст - это новая задача
-                        await handleAddTask(message, env);
+                        await handleAddTask(update.message, env);
                     }
                 }
-            } catch (e) {
-                console.error("Fetch Error:", e);
-            }
+                if (update.callback_query) await handleCallbackQuery(update.callback_query, env);
+            } catch (e) { console.error("Error:", e); }
         }
         return new Response('OK');
     },
 };
+
+// ... остальные функции (handleStart, handleAddTask, sendMessage и т.д.) без изменений ...
+// Просто оставь их ниже в файле, как они были.
 
 // --- Обработчики ---
 
